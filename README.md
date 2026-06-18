@@ -45,35 +45,6 @@ graph TD
 
 ---
 
-## Installation & Setup
-
-### 1. Configure API Credentials
-Create the config directory and credentials file manually at `~/.config/clicky/credentials.env` and paste your API keys:
-```env
-# ~/.config/clicky/credentials.env
-ANTHROPIC_API_KEY="your-anthropic-key"
-ELEVENLABS_API_KEY="your-elevenlabs-key"
-ASSEMBLYAI_API_KEY="your-assemblyai-key"
-ELEVENLABS_VOICE_ID="kPzsL2i3teMYv0FxEYQ6" # Optional: defaults to Rachel
-```
-
-### 2. Run the Integrated Setup
-Execute the setup command directly through the AppImage. This will automatically install dependencies, configure input permissions, and prepare your virtual environment:
-```bash
-# Make the AppImage executable
-chmod +x HeyClicky-x86_64.AppImage
-
-# Run the integrated installer (requires sudo for packages and device permissions)
-./HeyClicky-x86_64.AppImage setup
-```
-The integrated installer will:
-- Install native system dependencies (`mpv`, `grim`, `pipewire-utils`, `acl`).
-- Configure user permissions to read input devices persistently (`input` group).
-- Apply immediate Access Control Lists (`setfacl`) so keyboard monitoring works instantly without needing a system reboot or logout.
-- Set up an isolated Python virtual environment containing the necessary packages.
-
----
-
 ## Running the Application
 
 There are two ways to run the application: compiling it as a standalone AppImage, or running the Python files directly.
