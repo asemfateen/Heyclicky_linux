@@ -53,8 +53,8 @@ There are two ways to run the application: compiling it as a standalone AppImage
 
 1. **Build the AppImage**:
    ```bash
-   chmod +x build_appimage.sh
-   ./build_appimage.sh
+   chmod +x src/build_appimage.sh
+   ./src/build_appimage.sh
    ```
 2. **Launch the binary**:
    ```bash
@@ -66,7 +66,7 @@ There are two ways to run the application: compiling it as a standalone AppImage
 
 If you'd like to test changes without compiling the AppImage, you can run the GTK overlay directly using the installed virtual environment:
 ```bash
-~/.local/share/clicky/venv/bin/python3 overlay.py &
+~/.local/share/clicky/venv/bin/python3 src/overlay.py &
 ```
 
 ---
