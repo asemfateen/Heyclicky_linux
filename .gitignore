@@ -6,3 +6,8 @@ build/
 releases/
 .claude/
 coding-plans/
+
+# Clicky Linux build artifacts
+HeyClicky-x86_64.AppImage
+appimagetool-x86_64.AppImage
+HeyClicky.AppDir/
