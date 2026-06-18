@@ -20,11 +20,12 @@ class ClickyOverlayWindow(Gtk.Window):
         # Configure window characteristics for a full-screen HUD overlay
         self.set_title("HeyClicky Overlay")
         self.set_decorated(False)
+        self.fullscreen()
         self.set_keep_above(True)
         self.set_accept_focus(False)
-        
-        # Maximizing window to cover full display
-        self.maximize()
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
+        self.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
 
         # Support alpha channel (transparency)
         screen = self.get_screen()
