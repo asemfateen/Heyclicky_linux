@@ -48,7 +48,7 @@ graph TD
 ## Installation & Setup
 
 ### 1. Configure API Credentials
-Create the config file manually at `~/.config/clicky/credentials.env` and paste your API keys:
+Create the config directory and credentials file manually at `~/.config/clicky/credentials.env` and paste your API keys:
 ```env
 # ~/.config/clicky/credentials.env
 ANTHROPIC_API_KEY="your-anthropic-key"
@@ -58,7 +58,7 @@ ELEVENLABS_VOICE_ID="kPzsL2i3teMYv0FxEYQ6" # Optional: defaults to Rachel
 ```
 
 ### 2. Run the Universal Installer
-Clone the repository, open a terminal, and run:
+Clone this repository, navigate to the folder, and execute:
 ```bash
 chmod +x setup.sh
 ./setup.sh
@@ -67,31 +67,38 @@ The installer script will automatically:
 - Install native system dependencies (`mpv`, `grim`, `pipewire-utils`, `acl`).
 - Configure user permissions to read input devices persistently.
 - Apply immediate Access Control Lists (`setfacl`) so the hotkey works instantly without needing a system reboot or logout.
-- Set up an isolated Python virtual environment.
+- Set up an isolated Python virtual environment containing the necessary packages.
 
 ---
 
 ## Running the Application
 
-### Running with the AppImage
-We package all logic into a single executable binary:
-1. **Make the AppImage executable**:
+There are two ways to run the application: compiling it as a standalone AppImage, or running the Python files directly.
+
+### Option A: Compile & Run AppImage (Recommended)
+
+1. **Build the AppImage**:
+   ```bash
+   chmod +x build_appimage.sh
+   ./build_appimage.sh
+   ```
+2. **Launch the binary**:
    ```bash
    chmod +x HeyClicky-x86_64.AppImage
-   ```
-2. **Start the HUD daemon**:
-   ```bash
    ./HeyClicky-x86_64.AppImage daemon &
    ```
 
-To run HeyClicky automatically at startup, add `/path/to/HeyClicky-x86_64.AppImage daemon &` to your desktop environment autostart scripts.
+### Option B: Run via Python directly (For Development)
+
+If you'd like to test changes without compiling the AppImage, you can run the GTK overlay directly using the installed virtual environment:
+```bash
+~/.local/share/clicky/venv/bin/python3 overlay.py &
+```
 
 ---
 
-## Development
+## Autostart Integration
 
-If you make modifications to the Python or Bash scripts, you can rebuild the AppImage using the automation compiler:
-```bash
-./build_appimage.sh
-```
-This will compile all dependencies and source files into `HeyClicky-x86_64.AppImage`.
+To run HeyClicky automatically when your system starts:
+- **For AppImage**: Add `/path/to/HeyClicky-x86_64.AppImage daemon &` to your desktop environment startup applications.
+- **For Python script**: A desktop file is automatically generated at `~/.config/autostart/clicky-daemon.desktop` by the installer pointing to the virtual environment python interpreter.
