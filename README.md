@@ -57,16 +57,19 @@ ASSEMBLYAI_API_KEY="your-assemblyai-key"
 ELEVENLABS_VOICE_ID="kPzsL2i3teMYv0FxEYQ6" # Optional: defaults to Rachel
 ```
 
-### 2. Run the Universal Installer
-Clone this repository, navigate to the folder, and execute:
+### 2. Run the Integrated Setup
+Execute the setup command directly through the AppImage. This will automatically install dependencies, configure input permissions, and prepare your virtual environment:
 ```bash
-chmod +x setup.sh
-./setup.sh
+# Make the AppImage executable
+chmod +x HeyClicky-x86_64.AppImage
+
+# Run the integrated installer (requires sudo for packages and device permissions)
+./HeyClicky-x86_64.AppImage setup
 ```
-The installer script will automatically:
+The integrated installer will:
 - Install native system dependencies (`mpv`, `grim`, `pipewire-utils`, `acl`).
-- Configure user permissions to read input devices persistently.
-- Apply immediate Access Control Lists (`setfacl`) so the hotkey works instantly without needing a system reboot or logout.
+- Configure user permissions to read input devices persistently (`input` group).
+- Apply immediate Access Control Lists (`setfacl`) so keyboard monitoring works instantly without needing a system reboot or logout.
 - Set up an isolated Python virtual environment containing the necessary packages.
 
 ---
