@@ -36,7 +36,7 @@ graph TD
     Brain -->|7. Speech-to-Text| AssemblyAI[AssemblyAI API]
     Brain -->|8. Visual Reasoning| Claude[Claude 3.5 Sonnet]
     Brain -->|9. Text-to-Speech Stream| ElevenLabs[ElevenLabs Flash]
-    Brain -->|10. Write Pointer coords| StateJSON[/tmp/clicky_state.json]
+    Brain -->|10. Write Pointer coords| StateJSON["/tmp/clicky_state.json"]
     
     ElevenLabs -->|11. Audio Stream| MPV[mpv player]
     StateJSON -->|12. Poll Coordinate State| Overlay
