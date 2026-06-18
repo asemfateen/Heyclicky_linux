@@ -49,28 +49,18 @@ graph TD
 
 Since a pre-compiled `HeyClicky-x86_64.AppImage` is tracked directly in the repository root, you can run the application immediately after cloning:
 
-### 1. Configure API Credentials
-Create the config directory and credentials file manually at `~/.config/clicky/credentials.env` and paste your API keys:
-```env
-# ~/.config/clicky/credentials.env
-ANTHROPIC_API_KEY="your-anthropic-key"
-ELEVENLABS_API_KEY="your-elevenlabs-key"
-ASSEMBLYAI_API_KEY="your-assemblyai-key"
-ELEVENLABS_VOICE_ID="kPzsL2i3teMYv0FxEYQ6" # Optional: defaults to Rachel
-```
-
-### 2. Make the AppImage Executable
+### 1. Make the AppImage Executable
 ```bash
 chmod +x HeyClicky-x86_64.AppImage
 ```
 
-### 3. Run the Integrated Setup
+### 2. Run the Integrated Setup
 Execute the setup command directly through the AppImage (this will install system packages and configure input device permissions in one step):
 ```bash
 ./HeyClicky-x86_64.AppImage setup
 ```
 
-### 4. Run the Daemon
+### 3. Run the Daemon
 Launch the background overlay HUD and hotkey listener:
 ```bash
 ./HeyClicky-x86_64.AppImage daemon &
