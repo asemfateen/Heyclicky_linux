@@ -21,6 +21,7 @@ cp brain.py "$APP_DIR/usr/bin/"
 cp overlay.py "$APP_DIR/usr/bin/"
 cp capture.py "$APP_DIR/usr/bin/"
 cp trigger.sh "$APP_DIR/usr/bin/"
+cp setup.sh "$APP_DIR/usr/bin/"
 
 # Ensure correct execution permissions inside the AppDir
 chmod +x "$APP_DIR/usr/bin/"*
@@ -45,6 +46,9 @@ PYTHON_BIN="${VENV_PATH:-/usr}/bin/python3"
 
 # Route execution based on parameter command
 case "$1" in
+    setup)
+        exec bash "$HERE/usr/bin/setup.sh"
+        ;;
     daemon)
         exec "$PYTHON_BIN" "$HERE/usr/bin/overlay.py"
         ;;
@@ -55,7 +59,7 @@ case "$1" in
         exec /usr/bin/env VENV_PATH="$VENV_PATH" "$HERE/usr/bin/trigger.sh" release
         ;;
     *)
-        echo "Usage: HeyClicky.AppImage [daemon|press|release]"
+        echo "Usage: HeyClicky.AppImage [setup|daemon|press|release]"
         exit 1
         ;;
 esac
