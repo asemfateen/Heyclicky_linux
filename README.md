@@ -47,26 +47,33 @@ graph TD
 
 ## Running the Application
 
-There are two ways to run the application: compiling it as a standalone AppImage, or running the Python files directly.
+Since a pre-compiled `HeyClicky-x86_64.AppImage` is tracked directly in the repository root, you can run the application immediately after cloning:
 
-### Option A: Compile & Run AppImage (Recommended)
+### 1. Configure API Credentials
+Create the config directory and credentials file manually at `~/.config/clicky/credentials.env` and paste your API keys:
+```env
+# ~/.config/clicky/credentials.env
+ANTHROPIC_API_KEY="your-anthropic-key"
+ELEVENLABS_API_KEY="your-elevenlabs-key"
+ASSEMBLYAI_API_KEY="your-assemblyai-key"
+ELEVENLABS_VOICE_ID="kPzsL2i3teMYv0FxEYQ6" # Optional: defaults to Rachel
+```
 
-1. **Build the AppImage**:
-   ```bash
-   chmod +x src/build_appimage.sh
-   ./src/build_appimage.sh
-   ```
-2. **Launch the binary**:
-   ```bash
-   chmod +x HeyClicky-x86_64.AppImage
-   ./HeyClicky-x86_64.AppImage daemon &
-   ```
-
-### Option B: Run via Python directly (For Development)
-
-If you'd like to test changes without compiling the AppImage, you can run the GTK overlay directly using the installed virtual environment:
+### 2. Make the AppImage Executable
 ```bash
-~/.local/share/clicky/venv/bin/python3 src/overlay.py &
+chmod +x HeyClicky-x86_64.AppImage
+```
+
+### 3. Run the Integrated Setup
+Execute the setup command directly through the AppImage (this will install system packages and configure input device permissions in one step):
+```bash
+./HeyClicky-x86_64.AppImage setup
+```
+
+### 4. Run the Daemon
+Launch the background overlay HUD and hotkey listener:
+```bash
+./HeyClicky-x86_64.AppImage daemon &
 ```
 
 ---
@@ -76,3 +83,14 @@ If you'd like to test changes without compiling the AppImage, you can run the GT
 To run HeyClicky automatically when your system starts:
 - **For AppImage**: Add `/path/to/HeyClicky-x86_64.AppImage daemon &` to your desktop environment startup applications.
 - **For Python script**: A desktop file is automatically generated at `~/.config/autostart/clicky-daemon.desktop` by the installer pointing to the virtual environment python interpreter.
+
+---
+
+## Development
+
+If you make modifications to the Python or Bash scripts inside the `src/` directory, you can rebuild the AppImage using the compiler script:
+```bash
+chmod +x src/build_appimage.sh
+./src/build_appimage.sh
+```
+This will compile your modifications and overwrite the `HeyClicky-x86_64.AppImage` binary in the root directory.
