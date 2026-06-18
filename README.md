@@ -1,162 +1,97 @@
-Update: April 27, 2026.
+# HeyClicky Linux Port 🐧
 
-Hi there! I'm Farza, the guy that made Clicky.
+HeyClicky Linux is a voice-driven, screen-aware AI assistant built natively for Linux environments. It runs as a lightweight background daemon that captures your active screen and microphone when you hold down a hardware hotkey, queries Claude 3.5 Sonnet for vision-aware reasoning, and streams natural spoken audio back to you almost instantly.
 
-The existing codebase remains open source. Tinker with it, make it yours, start a company out of it, do whatever you want I don't mind. But, for all the new stuff I'm hacking on, gonna keep it private. To get the latest Clicky, you can go [here](https://www.heyclicky.com/).
+Unlike the macOS version, this port bypasses heavy app frameworks and sandboxed display protocols, leveraging native Linux command-line utilities and hardware-level keypress capturing for ultra-low latency.
 
-I also tweeted about this [here](https://x.com/FarzaTV/status/2043402737828962489).
+---
 
-Go crazy with this repo!! It's an MIT license.
+## Features
 
-# Hi, this is Clicky.
-It's an AI teacher that lives as a buddy next to your cursor. It can see your screen, talk to you, and even point at stuff. Kinda like having a real teacher next to you.
+- **Hardware-Level Push-To-Talk**: Intercepts `Caps Lock` presses and releases directly via `/dev/input/` (using `evdev`), providing true push-to-talk capability across Wayland (Hyprland, GNOME, KDE) and X11 out-of-the-box.
+- **Adaptive Screen Grabbing**: Automatically detects the session type and uses native, silent screenshot tools (like `grim` on Wayland/wlroots or `maim` on X11) to capture your desktop in milliseconds.
+- **Low-Latency Streaming Speech**: Streams text responses from Claude and feeds ElevenLabs TTS audio chunks directly to `mpv`'s input stream for instant real-time playback.
+- **Sleek HUD Overlay**: Renders an animated, glowing neon-blue pointer cursor and custom tooltip speech bubble using GTK3 (`PyGObject`) and Cairo, which is 100% click-through.
+- **AppImage Distribution**: Packaged as a single standalone executable binary.
 
-Download it [here](https://www.clicky.so/) for free.
+---
 
-Here's the [original tweet](https://x.com/FarzaTV/status/2041314633978659092) that kinda blew up for a demo for more context.
+## Architecture Diagram
 
-![Clicky — an ai buddy that lives on your mac](clicky-demo.gif)
-
-This is the open-source version of Clicky for those that want to hack on it, build their own features, or just see how it works under the hood.
-
-## Get started with Claude Code
-
-The fastest way to get this running is with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
-
-Once you get Claude running, paste this:
-
+```mermaid
+graph TD
+    User([User Holds Caps Lock]) -->|evdev Hardware Interception| Overlay[overlay.py GTK3 Daemon]
+    Overlay -->|1. Run press action| Trigger[trigger.sh]
+    Trigger -->|2. Grab Screenshot| Capture[capture.py grim/maim]
+    Trigger -->|3. Record Mic| Record[pw-record PipeWire]
+    
+    User([User Releases Caps Lock]) -->|evdev Release Event| Overlay
+    Overlay -->|4. Run release action| Trigger
+    Trigger -->|5. Stop Recording| Record
+    Trigger -->|6. Process Context| Brain[brain.py asyncio]
+    
+    Record -->|Ingest wav| Brain
+    Capture -->|Ingest png| Brain
+    
+    Brain -->|7. Speech-to-Text| AssemblyAI[AssemblyAI API]
+    Brain -->|8. Visual Reasoning| Claude[Claude 3.5 Sonnet]
+    Brain -->|9. Text-to-Speech Stream| ElevenLabs[ElevenLabs Flash]
+    Brain -->|10. Write Pointer coords| StateJSON[/tmp/clicky_state.json]
+    
+    ElevenLabs -->|11. Audio Stream| MPV[mpv player]
+    StateJSON -->|12. Poll Coordinate State| Overlay
+    Overlay -->|13. Glide Triangle| screen["Point on Screen"]
 ```
-Hi Claude.
 
-Clone https://github.com/farzaa/clicky.git into my current directory.
+---
 
-Then read the CLAUDE.md. I want to get Clicky running locally on my Mac.
+## Installation & Setup
 
-Help me set up everything — the Cloudflare Worker with my own API keys, the proxy URLs, and getting it building in Xcode. Walk me through it.
+### 1. Configure API Credentials
+Create the config file manually at `~/.config/clicky/credentials.env` and paste your API keys:
+```env
+# ~/.config/clicky/credentials.env
+ANTHROPIC_API_KEY="your-anthropic-key"
+ELEVENLABS_API_KEY="your-elevenlabs-key"
+ASSEMBLYAI_API_KEY="your-assemblyai-key"
+ELEVENLABS_VOICE_ID="kPzsL2i3teMYv0FxEYQ6" # Optional: defaults to Rachel
 ```
 
-That's it. It'll clone the repo, read the docs, and walk you through the whole setup. Once you're running you can just keep talking to it — build features, fix bugs, whatever. Go crazy.
-
-## Manual setup
-
-If you want to do it yourself, here's the deal.
-
-### Prerequisites
-
-- macOS 14.2+ (for ScreenCaptureKit)
-- Xcode 15+
-- Node.js 18+ (for the Cloudflare Worker)
-- A [Cloudflare](https://cloudflare.com) account (free tier works)
-- API keys for: [Anthropic](https://console.anthropic.com), [AssemblyAI](https://www.assemblyai.com), [ElevenLabs](https://elevenlabs.io)
-
-### 1. Set up the Cloudflare Worker
-
-The Worker is a tiny proxy that holds your API keys. The app talks to the Worker, the Worker talks to the APIs. This way your keys never ship in the app binary.
-
+### 2. Run the Universal Installer
+Clone the repository, open a terminal, and run:
 ```bash
-cd worker
-npm install
+chmod +x setup.sh
+./setup.sh
 ```
+The installer script will automatically:
+- Install native system dependencies (`mpv`, `grim`, `pipewire-utils`, `acl`).
+- Configure user permissions to read input devices persistently.
+- Apply immediate Access Control Lists (`setfacl`) so the hotkey works instantly without needing a system reboot or logout.
+- Set up an isolated Python virtual environment.
 
-Now add your secrets. Wrangler will prompt you to paste each one:
+---
 
+## Running the Application
+
+### Running with the AppImage
+We package all logic into a single executable binary:
+1. **Make the AppImage executable**:
+   ```bash
+   chmod +x HeyClicky-x86_64.AppImage
+   ```
+2. **Start the HUD daemon**:
+   ```bash
+   ./HeyClicky-x86_64.AppImage daemon &
+   ```
+
+To run HeyClicky automatically at startup, add `/path/to/HeyClicky-x86_64.AppImage daemon &` to your desktop environment autostart scripts.
+
+---
+
+## Development
+
+If you make modifications to the Python or Bash scripts, you can rebuild the AppImage using the automation compiler:
 ```bash
-npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put ASSEMBLYAI_API_KEY
-npx wrangler secret put ELEVENLABS_API_KEY
+./build_appimage.sh
 ```
-
-For the ElevenLabs voice ID, open `wrangler.toml` and set it there (it's not sensitive):
-
-```toml
-[vars]
-ELEVENLABS_VOICE_ID = "your-voice-id-here"
-```
-
-Deploy it:
-
-```bash
-npx wrangler deploy
-```
-
-It'll give you a URL like `https://your-worker-name.your-subdomain.workers.dev`. Copy that.
-
-### 2. Run the Worker locally (for development)
-
-If you want to test changes to the Worker without deploying:
-
-```bash
-cd worker
-npx wrangler dev
-```
-
-This starts a local server (usually `http://localhost:8787`) that behaves exactly like the deployed Worker. You'll need to create a `.dev.vars` file in the `worker/` directory with your keys:
-
-```
-ANTHROPIC_API_KEY=sk-ant-...
-ASSEMBLYAI_API_KEY=...
-ELEVENLABS_API_KEY=...
-ELEVENLABS_VOICE_ID=...
-```
-
-Then update the proxy URLs in the Swift code to point to `http://localhost:8787` instead of the deployed Worker URL while developing. Grep for `clicky-proxy` to find them all.
-
-### 3. Update the proxy URLs in the app
-
-The app has the Worker URL hardcoded in a few places. Search for `your-worker-name.your-subdomain.workers.dev` and replace it with your Worker URL:
-
-```bash
-grep -r "clicky-proxy" leanring-buddy/
-```
-
-You'll find it in:
-- `CompanionManager.swift` — Claude chat + ElevenLabs TTS
-- `AssemblyAIStreamingTranscriptionProvider.swift` — AssemblyAI token endpoint
-
-### 4. Open in Xcode and run
-
-```bash
-open leanring-buddy.xcodeproj
-```
-
-In Xcode:
-1. Select the `leanring-buddy` scheme (yes, the typo is intentional, long story)
-2. Set your signing team under Signing & Capabilities
-3. Hit **Cmd + R** to build and run
-
-The app will appear in your menu bar (not the dock). Click the icon to open the panel, grant the permissions it asks for, and you're good.
-
-### Permissions the app needs
-
-- **Microphone** — for push-to-talk voice capture
-- **Accessibility** — for the global keyboard shortcut (Control + Option)
-- **Screen Recording** — for taking screenshots when you use the hotkey
-- **Screen Content** — for ScreenCaptureKit access
-
-## Architecture
-
-If you want the full technical breakdown, read `CLAUDE.md`. But here's the short version:
-
-**Menu bar app** (no dock icon) with two `NSPanel` windows — one for the control panel dropdown, one for the full-screen transparent cursor overlay. Push-to-talk streams audio over a websocket to AssemblyAI, sends the transcript + screenshot to Claude via streaming SSE, and plays the response through ElevenLabs TTS. Claude can embed `[POINT:x,y:label:screenN]` tags in its responses to make the cursor fly to specific UI elements across multiple monitors. All three APIs are proxied through a Cloudflare Worker.
-
-## Project structure
-
-```
-leanring-buddy/          # Swift source (yes, the typo stays)
-  CompanionManager.swift    # Central state machine
-  CompanionPanelView.swift  # Menu bar panel UI
-  ClaudeAPI.swift           # Claude streaming client
-  ElevenLabsTTSClient.swift # Text-to-speech playback
-  OverlayWindow.swift       # Blue cursor overlay
-  AssemblyAI*.swift         # Real-time transcription
-  BuddyDictation*.swift     # Push-to-talk pipeline
-worker/                  # Cloudflare Worker proxy
-  src/index.ts              # Three routes: /chat, /tts, /transcribe-token
-CLAUDE.md                # Full architecture doc (agents read this)
-```
-
-## Contributing
-
-PRs welcome. If you're using Claude Code, it already knows the codebase — just tell it what you want to build and point it at `CLAUDE.md`.
-
-Got feedback? DM me on X [@farzatv](https://x.com/farzatv).
+This will compile all dependencies and source files into `HeyClicky-x86_64.AppImage`.
