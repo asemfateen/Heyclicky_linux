@@ -8,5 +8,5 @@ releases/
 coding-plans/
 
 # Clicky Linux build artifacts
-appimagetool-x86_64.AppImage
-HeyClicky.AppDir/
+src/appimagetool-x86_64.AppImage
+src/HeyClicky.AppDir/

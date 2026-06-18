@@ -6,10 +6,14 @@
 
 set -e # Exit immediately on error
 
+# Ensure execution context is in the script directory
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
 echo "Starting HeyClicky AppImage compilation..."
 
 APP_DIR="HeyClicky.AppDir"
-ICON_SOURCE="/home/asem/.gemini/antigravity/brain/b1c770d4-80b3-4bbf-a4fc-f2cb76ebc7cb/heyclicky_icon_1781811877630.png"
+ICON_SOURCE="heyclicky.png"
+
 
 # 1. Recreate clean directory structure
 rm -rf "$APP_DIR"
@@ -98,8 +102,8 @@ fi
 echo "Building final AppImage..."
 # Run tool with ARCH specified to avoid execution platform detection errors
 export ARCH=x86_64
-./appimagetool-x86_64.AppImage "$APP_DIR" "HeyClicky-x86_64.AppImage"
+./appimagetool-x86_64.AppImage "$APP_DIR" "../HeyClicky-x86_64.AppImage"
 
 echo "=============================================================================="
-echo "AppImage compiled successfully: HeyClicky-x86_64.AppImage"
+echo "AppImage compiled successfully: ../HeyClicky-x86_64.AppImage"
 echo "=============================================================================="
