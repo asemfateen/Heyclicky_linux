@@ -40,8 +40,8 @@ echo -e "\n${YELLOW}[1/3] Detecting system package manager...${NC}"
 
 if command -v apt-get &> /dev/null; then
     PKG_MGR="sudo apt-get install -y"
-    # Base dependencies including python3-venv and pipewire-bin (which contains pw-record)
-    DEPS="python3 python3-pip python3-venv python3-gi python3-gi-cairo mpv pipewire-bin pipewire-audio-client-libraries acl"
+    # Base core dependencies (including libfuse2)
+    DEPS="python3 python3-pip python3-venv python3-gi python3-gi-cairo mpv acl pulseaudio-utils libfuse2 jq"
     # Protocol specific
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
@@ -50,7 +50,7 @@ if command -v apt-get &> /dev/null; then
     fi
 elif command -v dnf &> /dev/null; then
     PKG_MGR="sudo dnf install -y"
-    DEPS="python3 python3-pip python3-gobject python3-cairo mpv pipewire-utils acl"
+    DEPS="python3 python3-pip python3-gobject python3-cairo mpv acl pulseaudio-utils fuse jq"
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
     else
@@ -58,7 +58,7 @@ elif command -v dnf &> /dev/null; then
     fi
 elif command -v pacman &> /dev/null; then
     PKG_MGR="sudo pacman -S --noconfirm --needed"
-    DEPS="python python-pip python-gobject python-cairo mpv pipewire acl"
+    DEPS="python python-pip python-gobject python-cairo mpv acl libpulse fuse2 jq"
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
     else
@@ -66,7 +66,7 @@ elif command -v pacman &> /dev/null; then
     fi
 elif command -v zypper &> /dev/null; then
     PKG_MGR="sudo zypper in -y"
-    DEPS="python3 python3-pip python3-gobject python3-cairo mpv pipewire acl"
+    DEPS="python3 python3-pip python3-gobject python3-cairo mpv acl pulseaudio-utils fuse jq"
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
     else
@@ -82,22 +82,55 @@ echo -e "Package Manager Found     : ${GREEN}${PKG_MGR%% *}${NC}"
 # ------------------------------------------------------------------------------
 # 3. System Dependency Installation
 # ------------------------------------------------------------------------------
-echo -e "\n${YELLOW}[2/3] Installing system dependencies (Requires Sudo)...${NC}"
+echo -e "\n${YELLOW}[2/3] Installing core system dependencies (Requires Sudo)...${NC}"
 echo -e "Running: $PKG_MGR $DEPS"
-$PKG_MGR $DEPS
+$PKG_MGR $DEPS || echo -e "${RED}Warning: Core system package installation failed/bypassed. Continuing setup...${NC}"
+
+# Try to install optional/desktop-specific helper packages without failing if some don't exist
+echo -e "\n${YELLOW}Installing optional desktop compatibility utilities...${NC}"
+echo "Authenticating sudo once for optional installations..."
+if sudo -v; then
+    if [ "$PKG_MGR" = "sudo apt-get install -y" ]; then
+        OPTIONAL_DEPS="pipewire-bin pipewire-audio-client-libraries gir1.2-gtklayershell-0.1 grim spectacle gnome-screenshot"
+        for pkg in $OPTIONAL_DEPS; do
+            echo "Attempting to install optional $pkg..."
+            sudo apt-get install -y "$pkg" || echo -e "${RED}Note: Optional package $pkg not available. Skipping.${NC}"
+        done
+    elif [ "$PKG_MGR" = "sudo dnf install -y" ]; then
+        OPTIONAL_DEPS="pipewire-utils gtk-layer-shell grim spectacle gnome-screenshot"
+        for pkg in $OPTIONAL_DEPS; do
+            echo "Attempting to install optional $pkg..."
+            sudo dnf install -y "$pkg" || echo -e "${RED}Note: Optional package $pkg not available. Skipping.${NC}"
+        done
+    elif [[ "$PKG_MGR" == *"pacman"* ]]; then
+        OPTIONAL_DEPS="pipewire gtk-layer-shell grim spectacle gnome-screenshot"
+        for pkg in $OPTIONAL_DEPS; do
+            echo "Attempting to install optional $pkg..."
+            sudo pacman -S --noconfirm --needed "$pkg" || echo -e "${RED}Note: Optional package $pkg not available. Skipping.${NC}"
+        done
+    elif [ "$PKG_MGR" = "sudo zypper in -y" ]; then
+        OPTIONAL_DEPS="pipewire gtk-layer-shell grim spectacle gnome-screenshot"
+        for pkg in $OPTIONAL_DEPS; do
+            echo "Attempting to install optional $pkg..."
+            sudo zypper in -y "$pkg" || echo -e "${RED}Note: Optional package $pkg not available. Skipping.${NC}"
+        done
+    fi
+else
+    echo -e "${RED}Warning: Sudo authentication bypassed. Skipping optional desktop package installation.${NC}"
+fi
 
 # Configure Input Device Permissions for evdev hotkeys
 echo -e "\n${YELLOW}Configuring system input permissions for hotkeys...${NC}"
 # 1. Add user to input group (permanent across reboots)
 if ! groups "$USER" | grep -q "\binput\b"; then
     echo "Adding $USER to the 'input' group for persistent keyboard monitoring..."
-    sudo usermod -aG input "$USER"
+    sudo usermod -aG input "$USER" || echo -e "${RED}Warning: Failed to add user to input group.${NC}"
 fi
 
 # 2. Apply ACL for instant session access (no reboot/logout needed)
 if command -v setfacl &> /dev/null; then
     echo "Instantly granting read access to /dev/input/event* for this session..."
-    sudo setfacl -m u:"$USER":r /dev/input/event*
+    sudo setfacl -m u:"$USER":r /dev/input/event* || echo -e "${RED}Warning: Failed to apply setfacl permissions.${NC}"
 else
     echo -e "${RED}Warning: setfacl command not found. Instant input permissions could not be applied.${NC}"
 fi
@@ -107,8 +140,8 @@ fi
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}[3/3] Setting up local application directories and configs...${NC}"
 
-CONFIG_DIR="$HOME/.config/clicky"
-SHARE_DIR="$HOME/.local/share/clicky"
+CONFIG_DIR="$HOME/.config/heyclicky"
+SHARE_DIR="$HOME/.local/share/heyclicky"
 AUTOSTART_DIR="$HOME/.config/autostart"
 
 mkdir -p "$CONFIG_DIR"
@@ -124,7 +157,7 @@ python3 -m venv --system-site-packages "$VENV_DIR"
 # Upgrade pip inside venv and install packages
 echo -e "Installing Python libraries within the virtual environment..."
 "$VENV_DIR/bin/pip" install --upgrade pip
-"$VENV_DIR/bin/pip" install anthropic assemblyai elevenlabs sounddevice numpy opencv-python evdev --quiet
+"$VENV_DIR/bin/pip" install evdev --quiet
 
 # Write env.conf
 ENV_FILE="$CONFIG_DIR/env.conf"
@@ -142,19 +175,22 @@ CRED_FILE="$CONFIG_DIR/credentials.env"
 if [ ! -f "$CRED_FILE" ]; then
     cat << EOF > "$CRED_FILE"
 # HeyClicky API Keys Config
+LLM_PROVIDER=""
 ANTHROPIC_API_KEY=""
+OPENAI_API_KEY=""
+GEMINI_API_KEY=""
 ELEVENLABS_API_KEY=""
 ASSEMBLYAI_API_KEY=""
 EOF
 fi
 
-# Generate an Autostart Desktop Entry pointing explicitly to virtual environment python & absolute daemon path
+# Generate an Autostart Desktop Entry pointing to the AppImage if running inside AppImage, or fallback to venv python
 # Note: Exec path must be absolute and does not expand shell variables ($HOME or ~) in standard desktop environments.
-cat << EOF > "$AUTOSTART_DIR/clicky-daemon.desktop"
+cat << EOF > "$AUTOSTART_DIR/heyclicky-daemon.desktop"
 [Desktop Entry]
 Type=Application
 Name=HeyClicky Linux Daemon
-Exec=$VENV_DIR/bin/python3 $CONFIG_DIR/daemon.py
+Exec=${APPIMAGE:-$VENV_DIR/bin/python3 $CONFIG_DIR/overlay.py} daemon
 X-GNOME-Autostart-enabled=true
 X-KDE-autostart-after=panel
 NoDisplay=true
@@ -162,7 +198,7 @@ EOF
 
 echo -e "${GREEN}Configuration written to: $ENV_FILE${NC}"
 echo -e "${GREEN}Credentials template created at: $CRED_FILE${NC}"
-echo -e "${GREEN}Autostart file generated at: $AUTOSTART_DIR/clicky-daemon.desktop${NC}"
+echo -e "${GREEN}Autostart file generated at: $AUTOSTART_DIR/heyclicky-daemon.desktop${NC}"
 
 echo -e "\n${GREEN}============ Phase 1 Completed Successfully! ============${NC}"
 echo -e "You can now safely transition to Phase 2 (The Capture Engine)."

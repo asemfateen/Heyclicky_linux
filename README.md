@@ -36,43 +36,39 @@ graph TD
     Brain -->|7. Speech-to-Text| AssemblyAI[AssemblyAI API]
     Brain -->|8. Visual Reasoning| Claude[Claude 3.5 Sonnet]
     Brain -->|9. Text-to-Speech Stream| ElevenLabs[ElevenLabs Flash]
-    Brain -->|10. Write Pointer coords| StateJSON["/tmp/clicky_state.json"]
-    
-    ElevenLabs -->|11. Audio Stream| MPV[mpv player]
-    StateJSON -->|12. Poll Coordinate State| Overlay
-    Overlay -->|13. Glide Triangle| screen["Point on Screen"]
+    Brain -->|10. Write Pointer coords| StateJSON["/tmp/heyclicky_state.json"]
+    StateJSON -.->|11. Poll coords| GTKOverlay
+    GTKOverlay -.->|12. Render neon pointer| User
 ```
 
 ---
 
-## Running the Application
+## 🚀 Quick Start (Recommended)
 
-Since a pre-compiled `HeyClicky-x86_64.AppImage` is tracked directly in the repository root, you can run the application immediately after cloning:
+### One-Line Zero-Touch Install
+For an automated setup that checks system dependencies (FUSE, curl, mpv), downloads the 1.4MB AppImage, creates the local Python virtual environment, and provisions hotkey permissions, run:
 
-### 1. Make the AppImage Executable
 ```bash
+curl -fsSL https://raw.githubusercontent.com/asemfateen/Heyclicky_linux/main/install.sh | bash
+```
+
+### Manual Install
+If you prefer to run the packaged AppImage directly from your clone directory:
+
+```bash
+# 1. Make the AppImage executable
 chmod +x HeyClicky-x86_64.AppImage
-```
 
-### 2. Run the Integrated Setup
-Execute the setup command directly through the AppImage (this will install system packages and configure input device permissions in one step):
-```bash
+# 2. Run the integrated setup/installer (installs system dependencies, configures permissions)
 ./HeyClicky-x86_64.AppImage setup
-```
 
-### 3. Run the Daemon
-Launch the background overlay HUD and hotkey listener:
-```bash
+# 3. Start the background monitoring daemon
 ./HeyClicky-x86_64.AppImage daemon &
 ```
 
----
-
-## Autostart Integration
-
 To run HeyClicky automatically when your system starts:
 - **For AppImage**: Add `/path/to/HeyClicky-x86_64.AppImage daemon &` to your desktop environment startup applications.
-- **For Python script**: A desktop file is automatically generated at `~/.config/autostart/clicky-daemon.desktop` by the installer pointing to the virtual environment python interpreter.
+- **For Python script**: A desktop file is automatically generated at `~/.config/autostart/heyclicky-daemon.desktop` by the installer pointing to the virtual environment python interpreter.
 
 ---
 

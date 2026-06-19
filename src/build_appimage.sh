@@ -40,7 +40,7 @@ cat << 'EOF' > "$APP_DIR/AppRun"
 HERE="$(dirname "$(readlink -f "${0}")")"
 
 # Load local environment settings to acquire virtual environment path VENV_PATH
-CONFIG_DIR="$HOME/.config/clicky"
+CONFIG_DIR="$HOME/.config/heyclicky"
 if [ -f "$CONFIG_DIR/env.conf" ]; then
     source "$CONFIG_DIR/env.conf"
 fi

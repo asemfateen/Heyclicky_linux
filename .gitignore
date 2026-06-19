@@ -10,3 +10,8 @@ coding-plans/
 # Clicky Linux build artifacts
 src/appimagetool-x86_64.AppImage
 src/HeyClicky.AppDir/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class

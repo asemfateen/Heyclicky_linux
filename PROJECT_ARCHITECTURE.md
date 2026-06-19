@@ -22,7 +22,7 @@
 * Must detect the package manager (`apt`, `dnf`, `pacman`, `zypper`).
 * Must detect `$XDG_SESSION_TYPE` and `$XDG_CURRENT_DESKTOP`.
 * Installs X11 tools (`maim`) or Wayland tools (`python3-pydbus`) dynamically.
-* Writes the detected configuration to `~/.config/clicky/env.conf`.
+* Writes the detected configuration to `~/.config/heyclicky/env.conf`.
 
 ### Phase 2: The Capture Engine (`capture.py` / `capture.sh`)
 * Reads `env.conf`.

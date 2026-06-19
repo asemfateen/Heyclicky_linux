@@ -5,27 +5,79 @@ import json
 import math
 import threading
 import subprocess
+import time
 import gi
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 import cairo
 
-STATE_FILE = "/tmp/clicky_state.json"
+# Try to import GtkLayerShell for Wayland overlays
+has_layer_shell = False
+try:
+    gi.require_version('GtkLayerShell', '0.1')
+    from gi.repository import GtkLayerShell
+    has_layer_shell = True
+except (ValueError, ImportError):
+    pass
 
-class ClickyOverlayWindow(Gtk.Window):
+STATE_FILE = f"/tmp/heyclicky_state_{os.getuid()}.json"
+
+class HeyClickyOverlayWindow(Gtk.Window):
     def __init__(self):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         
-        # Configure window characteristics for a full-screen HUD overlay
+        # Determine session type
+        env_file = os.path.expanduser("~/.config/heyclicky/env.conf")
+        session_type = "wayland"
+        if os.path.exists(env_file):
+            try:
+                with open(env_file, "r") as f:
+                    for line in f:
+                        if "SESSION_TYPE" in line:
+                            session_type = line.split("=")[-1].strip().strip('"').strip("'")
+            except Exception:
+                pass
+
         self.set_title("HeyClicky Overlay")
         self.set_decorated(False)
-        self.fullscreen()
-        self.set_keep_above(True)
+        
+        # Configure global window flags to completely bypass focus and task managers
         self.set_accept_focus(False)
         self.set_skip_taskbar_hint(True)
         self.set_skip_pager_hint(True)
         self.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+
+        # Resolve active monitor from mouse cursor position
+        display = Gdk.Display.get_default()
+        seat = display.get_default_seat()
+        pointer = seat.get_pointer()
+        screen, x, y = pointer.get_position()
+        monitor = display.get_monitor_at_point(x, y)
+        
+        # Use Layer Shell on Wayland for non-GNOME environments (GNOME doesn't support layer shell protocol)
+        self.using_layer_shell = False
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        if has_layer_shell and session_type == "wayland" and "gnome" not in desktop:
+            try:
+                GtkLayerShell.init_for_window(self)
+                GtkLayerShell.set_monitor(self, monitor)
+                GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+                GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+                # Anchor to all sides to make it fullscreen
+                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.LEFT, True)
+                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
+                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
+                self.using_layer_shell = True
+                print(f"Layer Shell initialized for window overlay on monitor: {monitor}")
+            except Exception as e:
+                print(f"Failed to initialize GtkLayerShell: {e}. Falling back to standard GTK window.", file=sys.stderr)
+                self.using_layer_shell = False
+
+        if not self.using_layer_shell:
+            self.fullscreen_on_monitor(screen, monitor)
+            self.set_keep_above(True)
 
         # Support alpha channel (transparency)
         screen = self.get_screen()
@@ -43,6 +95,7 @@ class ClickyOverlayWindow(Gtk.Window):
         self.target_x = None
         self.target_y = None
         self.target_label = None
+        self.current_monitor = None
         
         self.current_x = None
         self.current_y = None
@@ -60,73 +113,144 @@ class ClickyOverlayWindow(Gtk.Window):
         # Start the global evdev hardware hotkey listener
         self.start_evdev_listener()
 
+    def get_png_size(self, filepath):
+        """Parses a PNG file header to get its width and height without loading the image."""
+        try:
+            import struct
+            with open(filepath, 'rb') as f:
+                data = f.read(24)
+                if data[:8] == b'\x89PNG\r\n\x1a\n' and data[12:16] == b'IHDR':
+                    w, h = struct.unpack('>ii', data[16:24])
+                    return w, h
+        except Exception:
+            pass
+        return None, None
+
     def start_evdev_listener(self):
-        """Starts a background thread to intercept hardware keypress events for Caps Lock."""
-        def listen():
+        """Starts background threads to intercept hardware keypress events for Caps Lock across all keyboards."""
+        def listen_device(device_path, device_name):
+            try:
+                import evdev
+                from evdev import ecodes
+                
+                device = evdev.InputDevice(device_path)
+                print(f"[evdev] Listening for Caps Lock events on: {device_name} ({device_path})")
+                
+                # Resolve trigger.sh path dynamically (AppImage-safe)
+                appdir = os.environ.get("APPDIR")
+                if appdir:
+                    trigger_path = os.path.join(appdir, "usr", "bin", "trigger.sh")
+                else:
+                    here = os.path.dirname(os.path.abspath(__file__))
+                    trigger_path = os.path.join(here, "trigger.sh")
+                    
+                if not os.path.exists(trigger_path):
+                    trigger_path = os.path.expanduser("~/.config/heyclicky/trigger.sh")
+
+                for event in device.read_loop():
+                    if event.type == ecodes.EV_KEY:
+                        key_event = evdev.categorize(event)
+                        keycode = key_event.keycode
+                        is_caps = False
+                        if isinstance(keycode, str):
+                            is_caps = (keycode == 'KEY_CAPSLOCK')
+                        elif isinstance(keycode, list):
+                            is_caps = ('KEY_CAPSLOCK' in keycode)
+                            
+                        if is_caps:
+                            if key_event.keystate == key_event.key_down:
+                                print(f"[evdev] Caps Lock Pressed on {device_name} -> Start Capture")
+                                subprocess.run([trigger_path, "press"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            elif key_event.keystate == key_event.key_up:
+                                print(f"[evdev] Caps Lock Released on {device_name} -> Run AI Brain")
+                                subprocess.run([trigger_path, "release"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception as e:
+                # Thread exits on device disconnect
+                print(f"[evdev] Stopped listening to keyboard {device_name} ({device_path}): {e}", file=sys.stderr)
+
+        def manage_listeners():
             try:
                 import evdev
                 from evdev import ecodes
             except ImportError:
-                print("Warning: 'evdev' library not installed in Python environment. Global hardware hotkey disabled.", file=sys.stderr)
+                print("Warning: 'evdev' library not installed. Global hardware hotkey disabled.", file=sys.stderr)
                 return
 
-            keyboard_device = None
-            try:
-                # Iterate all input devices to find the hardware keyboard
-                devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
-                for device in devices:
-                    capabilities = device.capabilities()
-                    if ecodes.EV_KEY in capabilities:
-                        if ecodes.KEY_CAPSLOCK in capabilities[ecodes.EV_KEY]:
-                            keyboard_device = device
-                            break
-            except PermissionError:
-                print("Error: Permission denied reading input devices.", file=sys.stderr)
-                print("To fix, please run: sudo usermod -aG input $USER and reboot.", file=sys.stderr)
-                return
-            except Exception as e:
-                print(f"Error initializing input devices: {e}", file=sys.stderr)
-                return
+            active_devices = {}  # path -> thread
 
-            if not keyboard_device:
-                print("No input device detected with KEY_CAPSLOCK capability.", file=sys.stderr)
-                return
+            while True:
+                try:
+                    paths = evdev.list_devices()
+                    current_keyboards = {}
+                    
+                    for path in paths:
+                        try:
+                            dev = evdev.InputDevice(path)
+                            caps = dev.capabilities()
+                            if ecodes.EV_KEY in caps and ecodes.KEY_CAPSLOCK in caps[ecodes.EV_KEY]:
+                                current_keyboards[path] = dev.name
+                        except Exception:
+                            pass
+                    
+                    # Cleanup disconnected threads
+                    stale_paths = [p for p in active_devices if p not in current_keyboards]
+                    for p in stale_paths:
+                        active_devices.pop(p)
+                        
+                    # Spawn new listener threads for newly connected keyboards
+                    for path, name in current_keyboards.items():
+                        if path not in active_devices:
+                            print(f"[evdev] Keyboard detected: {name} ({path})")
+                            t = threading.Thread(target=listen_device, args=(path, name), daemon=True)
+                            t.start()
+                            active_devices[path] = t
+                except PermissionError:
+                    print("Error: Permission denied reading input devices.", file=sys.stderr)
+                    print("Please run: sudo usermod -aG input $USER and configure setfacl.", file=sys.stderr)
+                    subprocess.run(["notify-send", "HeyClicky Alert", "Permission denied reading input devices. Please configure udev rules."], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    import time
+                    time.sleep(10)
+                except Exception as e:
+                    print(f"Error checking input devices: {e}", file=sys.stderr)
+                
+                import time
+                time.sleep(3)
 
-            print(f"Intercepting global Caps Lock events on: {keyboard_device.name} ({keyboard_device.path})")
-
-            # Resolve the absolute path of trigger.sh dynamically next to this script
-            here = os.path.dirname(os.path.abspath(__file__))
-            trigger_path = os.path.join(here, "trigger.sh")
-            if not os.path.exists(trigger_path):
-                trigger_path = os.path.expanduser("~/Heyclicky_linux/clicky/trigger.sh")
-
-            try:
-                for event in keyboard_device.read_loop():
-                    if event.type == ecodes.EV_KEY:
-                        key_event = evdev.categorize(event)
-                        if key_event.keycode == 'KEY_CAPSLOCK':
-                            if key_event.keystate == key_event.key_down:
-                                print("[evdev] Caps Lock Pressed -> Start Capture")
-                                subprocess.run([trigger_path, "press"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            elif key_event.keystate == key_event.key_up:
-                                print("[evdev] Caps Lock Released -> Run AI Brain")
-                                subprocess.run([trigger_path, "release"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except PermissionError:
-                print("Error: Read permissions lost for input device. Run: sudo usermod -aG input $USER", file=sys.stderr)
-            except Exception as e:
-                print(f"evdev keyboard listener error: {e}", file=sys.stderr)
-
-        thread = threading.Thread(target=listen, daemon=True)
+        thread = threading.Thread(target=manage_listeners, daemon=True)
         thread.start()
 
+    def reposition_on_active_monitor(self):
+        """Checks where the mouse is and dynamically repositions the overlay to that monitor."""
+        display = Gdk.Display.get_default()
+        seat = display.get_default_seat()
+        pointer = seat.get_pointer()
+        screen, x, y = pointer.get_position()
+        monitor = display.get_monitor_at_point(x, y)
+        
+        if hasattr(self, 'current_monitor') and self.current_monitor == monitor:
+            return
+        
+        self.current_monitor = monitor
+        print(f"Repositioning overlay window to monitor under pointer: {monitor}")
+        
+        if self.using_layer_shell:
+            try:
+                GtkLayerShell.set_monitor(self, monitor)
+            except Exception as e:
+                print(f"Failed to dynamically move Layer Shell monitor: {e}", file=sys.stderr)
+        else:
+            try:
+                self.fullscreen_on_monitor(screen, monitor)
+            except Exception as e:
+                print(f"Failed to dynamically move fullscreen monitor: {e}", file=sys.stderr)
+
     def on_realize(self, widget):
-        # Configure input shape region to be empty so the entire window is click-through
-        region = cairo.Region()
-        widget.get_window().input_shape_combine_region(region, 0, 0)
-        print("Overlay window realized and configured for click-through.")
+        # Configure the GdkWindow to let all pointer events pass through natively
+        widget.get_window().set_pass_through(True)
+        print("Overlay window realized and configured for native click-through.")
 
     def on_poll_state(self):
-        """Polls /tmp/clicky_state.json to update target positions."""
+        """Polls /tmp/heyclicky_state.json to update target positions."""
         if not os.path.exists(STATE_FILE):
             self.state = "idle"
             self.target_x = None
@@ -139,11 +263,58 @@ class ClickyOverlayWindow(Gtk.Window):
                 data = json.load(f)
                 
             self.state = data.get("state", "idle")
+            self.response_text = data.get("text", "")
+            
+            # Reposition overlay to monitor under cursor during active states
+            if self.state in ("processing", "responding"):
+                self.reposition_on_active_monitor()
+                
             point = data.get("point")
             
             if self.state == "responding" and point:
-                self.target_x = point.get("x")
-                self.target_y = point.get("y")
+                raw_x = point.get("x")
+                raw_y = point.get("y")
+                
+                # Dynamic coordinate translation logic
+                # Read PNG header sizes of /tmp/heyclicky_screen_<UID>.png using struct
+                screen_png = f"/tmp/heyclicky_screen_{os.getuid()}.png"
+                w_phys, h_phys = self.get_png_size(screen_png)
+                w_log = self.get_allocated_width()
+                h_log = self.get_allocated_height()
+                
+                if w_phys and h_phys and w_log > 0 and h_log > 0:
+                    display = Gdk.Display.get_default()
+                    seat = display.get_default_seat()
+                    pointer = seat.get_pointer()
+                    _, px, py = pointer.get_position()
+                    monitor = display.get_monitor_at_point(px, py)
+                    geom = monitor.get_geometry()
+                    
+                    default_screen = Gdk.Screen.get_default()
+                    w_screen = default_screen.get_width()
+                    h_screen = default_screen.get_height()
+                    
+                    # Determine if screenshot is single monitor or full combined desktop
+                    aspect_phys = w_phys / h_phys
+                    aspect_monitor = geom.width / geom.height
+                    
+                    if abs(aspect_phys - aspect_monitor) < 0.1:
+                        # Single monitor screenshot
+                        scale_x = w_log / w_phys
+                        scale_y = h_log / h_phys
+                        self.target_x = raw_x * scale_x
+                        self.target_y = raw_y * scale_y
+                    else:
+                        # Full combined desktop screenshot
+                        scale_x = w_screen / w_phys
+                        scale_y = h_screen / h_phys
+                        # Subtract the active monitor's geometry origin offset
+                        self.target_x = (raw_x * scale_x) - geom.x
+                        self.target_y = (raw_y * scale_y) - geom.y
+                else:
+                    self.target_x = raw_x
+                    self.target_y = raw_y
+                    
                 self.target_label = point.get("label")
             else:
                 self.target_x = None
@@ -154,10 +325,45 @@ class ClickyOverlayWindow(Gtk.Window):
             pass
             
         return True
+            
+        return True
 
     def on_anim_tick(self):
         """Updates animation positions and triggers redrawing."""
         needs_redraw = False
+        
+        # Follow mouse pointer in real-time for cursor-glued states
+        if self.state in ("idle", "listening", "processing") or (self.state == "responding" and self.target_x is None):
+            display = Gdk.Display.get_default()
+            seat = display.get_default_seat()
+            pointer = seat.get_pointer()
+            _, px, py = pointer.get_position()
+            
+            # Reposition to monitor under pointer dynamically
+            self.reposition_on_active_monitor()
+            
+            geom = self.current_monitor.get_geometry() if self.current_monitor else display.get_monitor_at_point(px, py).get_geometry()
+            
+            # Float next to the mouse cursor (offset)
+            self.target_x = px - geom.x + 25
+            self.target_y = py - geom.y + 20
+            
+            # Animate spin and pulse if needed
+            if self.state == "processing":
+                if not hasattr(self, 'spin_angle'):
+                    self.spin_angle = 0.0
+                self.spin_angle = (self.spin_angle + 0.08) % (2 * math.pi)
+            
+            if self.state in ("listening", "processing"):
+                if not hasattr(self, 'pulse_angle'):
+                    self.pulse_angle = 0.0
+                self.pulse_angle = (self.pulse_angle + 0.05) % (2 * math.pi)
+                self.pulse_val = math.sin(self.pulse_angle) * 0.3 + 0.7
+            
+            # Ensure the overlay is always visible during idle/active states
+            if self.opacity < 1.0:
+                self.opacity = min(1.0, self.opacity + 0.1)
+            needs_redraw = True
         
         if self.target_x is not None and self.target_y is not None:
             # Initialize position if it's the first frame
@@ -173,9 +379,10 @@ class ClickyOverlayWindow(Gtk.Window):
             self.current_y += dy * 0.15
             
             # Fade in
-            if self.opacity < 1.0:
-                self.opacity = min(1.0, self.opacity + 0.1)
-                needs_redraw = True
+            if self.state == "responding" and self.target_x is not None:
+                if self.opacity < 1.0:
+                    self.opacity = min(1.0, self.opacity + 0.1)
+                    needs_redraw = True
                 
             # Check if we still need to animate movement
             if abs(dx) > 0.5 or abs(dy) > 0.5:
@@ -193,6 +400,33 @@ class ClickyOverlayWindow(Gtk.Window):
             self.queue_draw()
             
         return True
+
+    def wrap_text(self, ctx, text, max_width):
+        """Wraps text so that no line exceeds max_width pixels when rendered with the current font settings."""
+        words = text.split()
+        if not words:
+            return []
+        
+        lines = []
+        current_line = []
+        
+        for word in words:
+            test_line = " ".join(current_line + [word])
+            extents = ctx.text_extents(test_line)
+            if extents.width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(" ".join(current_line))
+                    current_line = [word]
+                else:
+                    lines.append(word)
+                    current_line = []
+                    
+        if current_line:
+            lines.append(" ".join(current_line))
+            
+        return lines
 
     def draw_rounded_rect(self, ctx, x, y, width, height, radius):
         """Draws a rounded rectangle path in cairo."""
@@ -216,87 +450,256 @@ class ClickyOverlayWindow(Gtk.Window):
 
         cx, cy = self.current_x, self.current_y
 
-        # Draw neon blue cursor triangle pointing at (cx, cy)
-        # We draw layers to simulate a glow effect
+        if self.state == "listening":
+            # Draw beautiful pulsing audio waveform centered at (cx, cy)
+            import time
+            import random
+            t = time.time() * 15
+            
+            if not hasattr(self, 'wave_noise'):
+                self.wave_noise = 0.5
+            self.wave_noise = max(0.0, min(1.0, self.wave_noise + random.uniform(-0.15, 0.15)))
+            
+            pulse = getattr(self, 'pulse_val', 0.8)
+            heights = [
+                3 + (math.sin(t) * 3 + 2) * self.wave_noise,
+                3 + (math.cos(t * 0.8) * 5 + 4) * self.wave_noise,
+                3 + (math.sin(t * 1.2) * 8 + 6) * self.wave_noise,
+                3 + (math.cos(t * 0.9) * 5 + 4) * self.wave_noise,
+                3 + (math.sin(t * 0.7) * 3 + 2) * self.wave_noise,
+            ]
+            
+            for i, h in enumerate(heights):
+                bx = cx - 9 + i * 4
+                by = cy - h / 2
+                self.draw_rounded_rect(ctx, bx, by, 2.0, h, 1.0)
+                ctx.set_source_rgba(0.20, 0.50, 1.0, self.opacity) # #3380FF
+                ctx.fill()
+                
+            return True
+
+        elif self.state == "processing":
+            # Draw beautiful spinning neon ring centered at (cx, cy)
+            spin = getattr(self, 'spin_angle', 0.0)
+            pulse = getattr(self, 'pulse_val', 0.8)
+            
+            radius = 7.0
+            
+            # 1. Outer breathing glow
+            ctx.set_source_rgba(0.20, 0.50, 1.0, 0.15 * pulse * self.opacity)
+            ctx.arc(cx, cy, radius + 4, 0, 2 * math.pi)
+            ctx.fill()
+            
+            # 2. Track ring
+            ctx.set_source_rgba(0.20, 0.50, 1.0, 0.15 * self.opacity)
+            ctx.set_line_width(2.0)
+            ctx.arc(cx, cy, radius, 0, 2 * math.pi)
+            ctx.stroke()
+            
+            # 3. Spinning active arc
+            ctx.set_source_rgba(0.20, 0.50, 1.0, 1.0 * self.opacity)
+            ctx.set_line_width(2.5)
+            ctx.arc(cx, cy, radius, spin, spin + 1.4 * math.pi)
+            ctx.stroke()
+            
+            return True
+
+        # Draw neon blue cursor triangle pointing at or rotated next to (cx, cy)
+        # 1. Outer Glow (faint)
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(math.radians(-35.0))
         
-        # 1. Outer Glow (Large, faint)
-        ctx.set_source_rgba(0.0, 0.74, 1.0, 0.18 * self.opacity)
-        ctx.move_to(cx, cy)
-        ctx.line_to(cx - 20, cy + 32)
-        ctx.line_to(cx + 20, cy + 32)
+        size = 14.0
+        height = size * math.sqrt(3.0) / 2.0
+        
+        ctx.move_to(0, -height / 1.5)
+        ctx.line_to(-size / 2, height / 3.0)
+        ctx.line_to(size / 2, height / 3.0)
         ctx.close_path()
-        ctx.fill()
+        
+        ctx.set_source_rgba(0.20, 0.50, 1.0, 0.4 * self.opacity)
+        ctx.set_line_width(4.0)
+        ctx.stroke()
+        ctx.restore()
 
-        # 2. Medium Glow
-        ctx.set_source_rgba(0.0, 0.74, 1.0, 0.4 * self.opacity)
-        ctx.move_to(cx, cy)
-        ctx.line_to(cx - 15, cy + 24)
-        ctx.line_to(cx + 15, cy + 24)
+        # 2. Solid Inner Triangle
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.rotate(math.radians(-35.0))
+        
+        ctx.move_to(0, -height / 1.5)
+        ctx.line_to(-size / 2, height / 3.0)
+        ctx.line_to(size / 2, height / 3.0)
         ctx.close_path()
+        
+        ctx.set_source_rgba(0.20, 0.50, 1.0, self.opacity)
         ctx.fill()
+        ctx.restore()
 
-        # 3. Solid Inner Triangle
-        ctx.set_source_rgba(0.0, 0.82, 1.0, 1.0 * self.opacity)
-        ctx.move_to(cx, cy)
-        ctx.line_to(cx - 10, cy + 16)
-        ctx.line_to(cx + 10, cy + 16)
-        ctx.close_path()
-        ctx.fill()
-
-        # 4. White tip highlights
-        ctx.set_source_rgba(1.0, 1.0, 1.0, 0.9 * self.opacity)
-        ctx.move_to(cx, cy)
-        ctx.line_to(cx - 4, cy + 7)
-        ctx.line_to(cx + 4, cy + 7)
-        ctx.close_path()
-        ctx.fill()
-
-        # Draw Label Bubble if text exists
+        # Draw Label Bubble if text exists (pointing target label)
         if self.target_label:
             ctx.select_font_face("Outfit", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-            ctx.set_font_size(13.0)
+            ctx.set_font_size(11.0)
             
             # Get text dimensions to scale bubble
             extents = ctx.text_extents(self.target_label)
             tw, th = extents.width, extents.height
             
             # Bubble layout calculations
-            pad_x = 12
-            pad_y = 8
+            pad_x = 8
+            pad_y = 4
             bw = tw + (pad_x * 2)
             bh = th + (pad_y * 2)
-            bx = cx - (bw / 2)
-            by = cy + 28  # Offset below the triangle pointer
+            bx = cx + 10
+            by = cy + 18
             
             # Draw semi-transparent bubble backdrop
-            ctx.set_source_rgba(0.04, 0.05, 0.09, 0.85 * self.opacity)
+            ctx.set_source_rgba(0.20, 0.50, 1.0, 1.0 * self.opacity)
             self.draw_rounded_rect(ctx, bx, by, bw, bh, 6)
             ctx.fill()
             
-            # Draw neon border highlight
-            ctx.set_source_rgba(0.0, 0.74, 1.0, 0.5 * self.opacity)
-            ctx.set_line_width(1.5)
+            # Draw neon shadow glow
+            ctx.set_source_rgba(0.20, 0.50, 1.0, 0.5 * self.opacity)
+            ctx.set_line_width(2.0)
             self.draw_rounded_rect(ctx, bx, by, bw, bh, 6)
             ctx.stroke()
             
             # Render label text
             ctx.set_source_rgba(1.0, 1.0, 1.0, 1.0 * self.opacity)
-            # Center alignment inside rect
-            ctx.move_to(bx + pad_x - extents.x_bearing, by + pad_y + th)
+            ctx.move_to(bx + pad_x, by + pad_y + th - 1.0)
             ctx.show_text(self.target_label)
 
+        # Draw Large Text Response Bubble next to mouse cursor if text exists
+        if self.state == "responding" and hasattr(self, 'response_text') and self.response_text:
+            ctx.select_font_face("Outfit", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+            ctx.set_font_size(13.0)
+            
+            # Wrap text to max 260 width
+            lines = self.wrap_text(ctx, self.response_text, 260.0)
+            
+            # Calculate bounds
+            max_line_w = 0
+            for line in lines:
+                extents = ctx.text_extents(line)
+                if extents.width > max_line_w:
+                    max_line_w = extents.width
+            
+            line_height = 18.0
+            pad_x = 14.0
+            pad_y = 10.0
+            
+            bw = max_line_w + (pad_x * 2)
+            bh = len(lines) * line_height + (pad_y * 2) - 4
+            
+            # Position it to the right and slightly below/above the actual mouse position
+            display = Gdk.Display.get_default()
+            seat = display.get_default_seat()
+            pointer = seat.get_pointer()
+            _, px, py = pointer.get_position()
+            geom = self.current_monitor.get_geometry() if hasattr(self, 'current_monitor') and self.current_monitor else display.get_monitor_at_point(px, py).get_geometry()
+            
+            local_px = px - geom.x
+            local_py = py - geom.y
+            
+            bx = local_px + 22.0
+            by = local_py + 6.0
+            
+            # Clamp to screen bounds
+            w_log = self.get_allocated_width()
+            h_log = self.get_allocated_height()
+            if bx + bw > w_log:
+                bx = local_px - 22.0 - bw
+            if by + bh > h_log:
+                by = local_py - 6.0 - bh
+                
+            bx = max(10.0, min(bx, w_log - bw - 10.0))
+            by = max(10.0, min(by, h_log - bh - 10.0))
+            
+            # Draw dark surface background
+            ctx.set_source_rgba(0.09, 0.10, 0.09, 0.95 * self.opacity) # surface1
+            self.draw_rounded_rect(ctx, bx, by, bw, bh, 10)
+            ctx.fill()
+            
+            # Draw subtle border outline
+            ctx.set_source_rgba(0.22, 0.23, 0.22, 0.5 * self.opacity) # borderSubtle
+            ctx.set_line_width(0.8)
+            self.draw_rounded_rect(ctx, bx, by, bw, bh, 10)
+            ctx.stroke()
+            
+            # Render lines
+            ctx.set_source_rgba(0.93, 0.93, 0.93, 1.0 * self.opacity) # textPrimary
+            for idx, line in enumerate(lines):
+                extents = ctx.text_extents(line)
+                ctx.move_to(bx + pad_x, by + pad_y + idx * line_height + 12.0)
+                ctx.show_text(line)
+
         return True
+
+import shutil
+
+def sanity_check_dependencies(session_type):
+    """Verifies that critical host binaries (mpv, screenshot, and audio tools) are installed."""
+    missing = []
+    
+    # 1. Check mpv and curl
+    if not shutil.which("mpv"):
+        missing.append("mpv (required for voice playback)")
+    if not shutil.which("curl"):
+        missing.append("curl (required for API calls)")
+        
+    # 2. Check screenshot tools depending on environment
+    screenshot_ok = False
+    if session_type == "wayland":
+        # Check standard Wayland CLI screenshot tools
+        if shutil.which("grim") or shutil.which("spectacle") or shutil.which("gnome-screenshot"):
+            screenshot_ok = True
+        else:
+            # Check pydbus / portal
+            try:
+                import gi
+                gi.require_version('GLib', '2.0')
+                from gi.repository import GLib
+                from pydbus import SessionBus
+                screenshot_ok = True
+            except Exception:
+                pass
+    else:
+        # X11 tools
+        if shutil.which("maim") or shutil.which("gnome-screenshot") or shutil.which("spectacle"):
+            screenshot_ok = True
+            
+    if not screenshot_ok:
+        if session_type == "wayland":
+            missing.append("a Wayland screenshot utility (grim, spectacle, or gnome-screenshot)")
+        else:
+            missing.append("an X11 screenshot utility (maim, gnome-screenshot, or spectacle)")
+            
+    # 3. Check audio recording tools (PipeWire or PulseAudio)
+    if not shutil.which("pw-record") and not shutil.which("parecord"):
+        missing.append("an audio recording utility (pw-record or parecord)")
+            
+    if missing:
+        msg = "Missing dependencies: " + ", ".join(missing)
+        subprocess.run(["notify-send", "HeyClicky Error", msg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        sys.exit(1)
 
 def main():
     # Force Gdk to use Wayland backend if Wayland is active, else X11
     # This prevents backend mapping warnings or crashes on mixed environments
-    env_file = os.path.expanduser("~/.config/clicky/env.conf")
+    env_file = os.path.expanduser("~/.config/heyclicky/env.conf")
     session_type = "wayland"
     if os.path.exists(env_file):
-        with open(env_file, "r") as f:
-            for line in f:
-                if "SESSION_TYPE" in line:
-                    session_type = line.split("=")[-1].strip().strip('"').strip("'")
+        try:
+            with open(env_file, "r") as f:
+                for line in f:
+                    if "SESSION_TYPE" in line:
+                        session_type = line.split("=")[-1].strip().strip('"').strip("'")
+        except Exception:
+            pass
+
+    # Run host binary checks before initializing GTK overlay
+    sanity_check_dependencies(session_type)
                     
     if session_type == "wayland":
         os.environ["GDK_BACKEND"] = "wayland"
@@ -318,7 +721,7 @@ def main():
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
 
-    app = ClickyOverlayWindow()
+    app = HeyClickyOverlayWindow()
     app.show_all()
     Gtk.main()
 

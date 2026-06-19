@@ -4,13 +4,17 @@
 # HeyClicky Linux Port - Phase 3 Trigger Script
 # ==============================================================================
 
-PID_FILE="/tmp/clicky_record.pid"
-AUDIO_OUT="/tmp/voice.wav"
-SCREENSHOT_OUT="/tmp/screen.png"
+CURRENT_UID=$(id -u)
+PID_FILE="/tmp/heyclicky_record_${CURRENT_UID}.pid"
+AUDIO_OUT="/tmp/heyclicky_voice_${CURRENT_UID}.wav"
+SCREENSHOT_OUT="/tmp/heyclicky_screen_${CURRENT_UID}.png"
+BRAIN_PID_FILE="/tmp/heyclicky_brain_${CURRENT_UID}.pid"
+MPV_PID_FILE="/tmp/heyclicky_mpv_${CURRENT_UID}.pid"
+STATE_FILE="/tmp/heyclicky_state_${CURRENT_UID}.json"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Read environment variables
-CONFIG_DIR="$HOME/.config/clicky"
+CONFIG_DIR="$HOME/.config/heyclicky"
 if [ -f "$CONFIG_DIR/env.conf" ]; then
     source "$CONFIG_DIR/env.conf"
 fi
@@ -32,6 +36,29 @@ ACTION=$(echo "$1" | tr '[:upper:]' '[:lower:]')
 
 case "$ACTION" in
     press)
+        # Kill any active brain.py process
+        if [ -f "$BRAIN_PID_FILE" ]; then
+            OLD_BRAIN_PID=$(cat "$BRAIN_PID_FILE")
+            if kill -0 "$OLD_BRAIN_PID" 2>/dev/null; then
+                echo "Stopping old AI brain (PID: $OLD_BRAIN_PID)..."
+                kill -9 "$OLD_BRAIN_PID" 2>/dev/null || true
+            fi
+            rm -f "$BRAIN_PID_FILE"
+        fi
+
+        # Kill any active mpv playback spawned by the old brain
+        if [ -f "$MPV_PID_FILE" ]; then
+            OLD_MPV_PID=$(cat "$MPV_PID_FILE")
+            if kill -0 "$OLD_MPV_PID" 2>/dev/null; then
+                echo "Stopping old playback (PID: $OLD_MPV_PID)..."
+                kill -9 "$OLD_MPV_PID" 2>/dev/null || true
+            fi
+            rm -f "$MPV_PID_FILE"
+        fi
+
+        # Clear any stale overlay state and set to listening
+        echo '{"state": "listening", "text": "", "point": null}' > "$STATE_FILE"
+
         # Check if already recording to prevent duplicate processes
         if [ -f "$PID_FILE" ]; then
             OLD_PID=$(cat "$PID_FILE")
@@ -50,9 +77,19 @@ case "$ACTION" in
         "$PYTHON_BIN" "$SCRIPT_DIR/capture.py" > /dev/null 2>&1 &
 
         echo "Recording audio..."
-        # Start pw-record in background
-        pw-record --rate=16000 --channels=1 --format=s16 "$AUDIO_OUT" > /dev/null 2>&1 &
-        RECORD_PID=$!
+        # Start pw-record (PipeWire) or fall back to parecord (PulseAudio)
+        if command -v pw-record >/dev/null 2>&1; then
+            echo "Recording audio using PipeWire (pw-record)..."
+            pw-record --rate=16000 --channels=1 --format=s16 "$AUDIO_OUT" > /dev/null 2>&1 &
+            RECORD_PID=$!
+        elif command -v parecord >/dev/null 2>&1; then
+            echo "Recording audio using PulseAudio (parecord)..."
+            parecord --format=s16ne --rate=16000 --channels=1 "$AUDIO_OUT" > /dev/null 2>&1 &
+            RECORD_PID=$!
+        else
+            echo "Error: Neither pw-record nor parecord was found in PATH." >&2
+            exit 1
+        fi
         
         # Save PID
         echo "$RECORD_PID" > "$PID_FILE"
@@ -60,6 +97,9 @@ case "$ACTION" in
         ;;
 
     release)
+        # Set state to processing immediately
+        echo '{"state": "processing", "text": "", "point": null}' > "$STATE_FILE"
+
         if [ ! -f "$PID_FILE" ]; then
             echo "Error: No active recording session found."
             exit 1
