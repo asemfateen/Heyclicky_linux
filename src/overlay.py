@@ -64,6 +64,7 @@ class HeyClickyOverlayWindow(Gtk.Window):
                 GtkLayerShell.set_monitor(self, monitor)
                 GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
                 GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+                GtkLayerShell.set_exclusive_zone(self, -1)
                 # Anchor to all sides to make it fullscreen
                 GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.LEFT, True)
                 GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)

@@ -46,7 +46,7 @@ if command -v apt-get &> /dev/null; then
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
     else
-        DEPS="$DEPS python3-pydbus gir1.2-xdgdesktopportal-1.0"
+        DEPS="$DEPS python3-pydbus gir1.2-xdgdesktopportal-1.0 gir1.2-gtklayershell-0.1"
     fi
 elif command -v dnf &> /dev/null; then
     PKG_MGR="sudo dnf install -y"
@@ -54,7 +54,7 @@ elif command -v dnf &> /dev/null; then
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
     else
-        DEPS="$DEPS python3-pydbus"
+        DEPS="$DEPS python3-pydbus gtk-layer-shell"
     fi
 elif command -v pacman &> /dev/null; then
     PKG_MGR="sudo pacman -S --noconfirm --needed"
@@ -62,7 +62,7 @@ elif command -v pacman &> /dev/null; then
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
     else
-        DEPS="$DEPS python-pydbus"
+        DEPS="$DEPS python-pydbus gtk-layer-shell"
     fi
 elif command -v zypper &> /dev/null; then
     PKG_MGR="sudo zypper in -y"
@@ -70,7 +70,7 @@ elif command -v zypper &> /dev/null; then
     if [ "$SESSION_TYPE" == "x11" ]; then
         DEPS="$DEPS maim xdotool xclip"
     else
-        DEPS="$DEPS python3-pydbus"
+        DEPS="$DEPS python3-pydbus gtk-layer-shell"
     fi
 else
     echo -e "${RED}Error: Unsupported package manager. Manual dependency installation required.${NC}"
