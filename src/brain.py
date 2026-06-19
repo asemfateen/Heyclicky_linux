@@ -4,6 +4,7 @@ import sys
 import re
 import json
 import base64
+import signal
 import subprocess
 import time
 
@@ -34,8 +35,10 @@ def update_state(state, text="", point=None):
         "point": point   # {"x": int, "y": int, "label": str} or None
     }
     try:
-        with open(STATE_FILE, "w") as f:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
             json.dump(data, f)
+        os.replace(tmp, STATE_FILE)
     except Exception as e:
         print(f"Error writing state file: {e}", file=sys.stderr)
 
@@ -469,7 +472,13 @@ def main():
         except OSError:
             pass
 
+def sigterm_handler(signum, frame):
+    """Clean up state when killed by SIGTERM instead of leaving stale state."""
+    update_state("idle")
+    sys.exit(0)
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, sigterm_handler)
     try:
         main()
     except KeyboardInterrupt:

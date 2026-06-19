@@ -101,6 +101,9 @@ class HeyClickyOverlayWindow(Gtk.Window):
         self.current_x = None
         self.current_y = None
         self.opacity = 0.0  # Fade animation
+        self.response_text = ""
+        self.last_state_change = time.time()
+        self.state_timeout = {"processing": 30, "responding": 60}
         
         # Schedule configuration of click-through and polling loop once realized
         self.connect("realize", self.on_realize)
@@ -262,27 +265,40 @@ class HeyClickyOverlayWindow(Gtk.Window):
         try:
             with open(STATE_FILE, "r") as f:
                 data = json.load(f)
-                
-            self.state = data.get("state", "idle")
+
+            new_state = data.get("state", "idle")
+            if new_state != self.state:
+                self.last_state_change = time.time()
+            self.state = new_state
             self.response_text = data.get("text", "")
-            
+
+            # Staleness guard: reset to idle if state has been active too long
+            elapsed = time.time() - self.last_state_change
+            timeout = self.state_timeout.get(self.state)
+            if timeout and elapsed > timeout:
+                print(f"State '{self.state}' timed out after {elapsed:.0f}s, resetting to idle")
+                self.state = "idle"
+                self.target_x = None
+                self.target_y = None
+                self.target_label = None
+                return True
+
             # Reposition overlay to monitor under cursor during active states
             if self.state in ("processing", "responding"):
                 self.reposition_on_active_monitor()
-                
+
             point = data.get("point")
-            
+
             if self.state == "responding" and point:
                 raw_x = point.get("x")
                 raw_y = point.get("y")
-                
+
                 # Dynamic coordinate translation logic
-                # Read PNG header sizes of /tmp/heyclicky_screen_<UID>.png using struct
                 screen_png = f"/tmp/heyclicky_screen_{os.getuid()}.png"
                 w_phys, h_phys = self.get_png_size(screen_png)
                 w_log = self.get_allocated_width()
                 h_log = self.get_allocated_height()
-                
+
                 if w_phys and h_phys and w_log > 0 and h_log > 0:
                     display = Gdk.Display.get_default()
                     seat = display.get_default_seat()
@@ -290,43 +306,36 @@ class HeyClickyOverlayWindow(Gtk.Window):
                     _, px, py = pointer.get_position()
                     monitor = display.get_monitor_at_point(px, py)
                     geom = monitor.get_geometry()
-                    
+
                     default_screen = Gdk.Screen.get_default()
                     w_screen = default_screen.get_width()
                     h_screen = default_screen.get_height()
-                    
-                    # Determine if screenshot is single monitor or full combined desktop
+
                     aspect_phys = w_phys / h_phys
                     aspect_monitor = geom.width / geom.height
-                    
+
                     if abs(aspect_phys - aspect_monitor) < 0.1:
-                        # Single monitor screenshot
                         scale_x = w_log / w_phys
                         scale_y = h_log / h_phys
                         self.target_x = raw_x * scale_x
                         self.target_y = raw_y * scale_y
                     else:
-                        # Full combined desktop screenshot
                         scale_x = w_screen / w_phys
                         scale_y = h_screen / h_phys
-                        # Subtract the active monitor's geometry origin offset
                         self.target_x = (raw_x * scale_x) - geom.x
                         self.target_y = (raw_y * scale_y) - geom.y
                 else:
                     self.target_x = raw_x
                     self.target_y = raw_y
-                    
+
                 self.target_label = point.get("label")
             else:
                 self.target_x = None
                 self.target_y = None
                 self.target_label = None
         except Exception:
-            # Silently ignore parsing errors from race conditions writing the JSON
             pass
-            
-        return True
-            
+
         return True
 
     def on_anim_tick(self):
@@ -708,7 +717,6 @@ def main():
         os.environ["GDK_BACKEND"] = "x11"
 
     # Load CSS provider to enforce transparent window background across themes
-    screen = Gdk.Screen.get_default()
     css_provider = Gtk.CssProvider()
     css_provider.load_from_data(b"""
         window {
@@ -716,11 +724,16 @@ def main():
             background: transparent;
         }
     """)
-    Gtk.StyleContext.add_provider_for_screen(
-        screen,
-        css_provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
+    try:
+        screen = Gdk.Screen.get_default()
+        if screen:
+            Gtk.StyleContext.add_provider_for_screen(
+                screen,
+                css_provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+    except Exception as e:
+        print(f"Warning: Could not set CSS provider: {e}", file=sys.stderr)
 
     app = HeyClickyOverlayWindow()
     app.show_all()

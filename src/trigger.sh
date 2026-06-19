@@ -41,7 +41,7 @@ case "$ACTION" in
             OLD_BRAIN_PID=$(cat "$BRAIN_PID_FILE")
             if kill -0 "$OLD_BRAIN_PID" 2>/dev/null; then
                 echo "Stopping old AI brain (PID: $OLD_BRAIN_PID)..."
-                kill -9 "$OLD_BRAIN_PID" 2>/dev/null || true
+                kill -15 "$OLD_BRAIN_PID" 2>/dev/null || true
             fi
             rm -f "$BRAIN_PID_FILE"
         fi
@@ -51,13 +51,14 @@ case "$ACTION" in
             OLD_MPV_PID=$(cat "$MPV_PID_FILE")
             if kill -0 "$OLD_MPV_PID" 2>/dev/null; then
                 echo "Stopping old playback (PID: $OLD_MPV_PID)..."
-                kill -9 "$OLD_MPV_PID" 2>/dev/null || true
+                kill -15 "$OLD_MPV_PID" 2>/dev/null || true
             fi
             rm -f "$MPV_PID_FILE"
         fi
 
-        # Clear any stale overlay state and set to listening
-        echo '{"state": "listening", "text": "", "point": null}' > "$STATE_FILE"
+        # Clear any stale overlay state and set to listening (atomic write)
+        echo '{"state": "listening", "text": "", "point": null}' > "${STATE_FILE}.tmp"
+        mv "${STATE_FILE}.tmp" "$STATE_FILE"
 
         # Check if already recording to prevent duplicate processes
         if [ -f "$PID_FILE" ]; then
@@ -73,8 +74,10 @@ case "$ACTION" in
         rm -f "$AUDIO_OUT" "$SCREENSHOT_OUT"
 
         echo "Starting screen capture..."
-        # Launch capture engine in background so voice recording starts instantly
+        # Launch capture engine, saving PID so release handler can wait for it
         "$PYTHON_BIN" "$SCRIPT_DIR/capture.py" > /dev/null 2>&1 &
+        CAPTURE_PID=$!
+        echo "$CAPTURE_PID" > /tmp/heyclicky_capture_${CURRENT_UID}.pid
 
         echo "Recording audio..."
         # Start pw-record (PipeWire) or fall back to parecord (PulseAudio)
@@ -97,9 +100,6 @@ case "$ACTION" in
         ;;
 
     release)
-        # Set state to processing immediately
-        echo '{"state": "processing", "text": "", "point": null}' > "$STATE_FILE"
-
         if [ ! -f "$PID_FILE" ]; then
             echo "Error: No active recording session found."
             exit 1
@@ -121,6 +121,21 @@ case "$ACTION" in
         else
             echo "Recording process $RECORD_PID was not running."
         fi
+
+        # Wait for screen capture to finish before launching AI Brain
+        CAPTURE_PID_FILE="/tmp/heyclicky_capture_${CURRENT_UID}.pid"
+        if [ -f "$CAPTURE_PID_FILE" ]; then
+            CAPTURE_PID=$(cat "$CAPTURE_PID_FILE")
+            rm -f "$CAPTURE_PID_FILE"
+            if kill -0 "$CAPTURE_PID" 2>/dev/null; then
+                echo "Waiting for screen capture (PID: $CAPTURE_PID) to complete..."
+                wait "$CAPTURE_PID" 2>/dev/null || true
+            fi
+        fi
+
+        # Write state atomically: temp file + rename to avoid partial reads by overlay
+        echo '{"state": "processing", "text": "", "point": null}' > "${STATE_FILE}.tmp"
+        mv "${STATE_FILE}.tmp" "$STATE_FILE"
 
         # Call AI Brain if daemon/script exists
         BRAIN_SCRIPT="$SCRIPT_DIR/brain.py"
