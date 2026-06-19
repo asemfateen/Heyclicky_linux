@@ -48,11 +48,35 @@ echo -e "📥 Downloading HeyClicky AppImage (Ultra-lean 1.4MB)..."
 curl -fsSL -o "$APPIMAGE_PATH" "https://github.com/asemfateen/Heyclicky_linux/raw/main/HeyClicky-x86_64.AppImage"
 chmod +x "$APPIMAGE_PATH"
 
+# Create a clean `heyclicky` command symlink so users never touch the .AppImage directly
+ln -sf "$APPIMAGE_PATH" "$BIN_DIR/heyclicky"
+
 # 4. Run the integrated AppImage setup to build the local virtual environment and config files
 echo -e "⚙️ Initializing local user-space configs and Python virtual environment..."
 "$APPIMAGE_PATH" setup
 
-# 5. Hot-inject Live evdev Session Permissions & Persist via udev
+# 5. Register a systemd user service for native background lifecycle management
+mkdir -p "$HOME/.config/systemd/user"
+cat <<EOF > "$HOME/.config/systemd/user/heyclicky.service"
+[Unit]
+Description=HeyClicky Native Linux Background Daemon
+After=graphical-session.target
+
+[Service]
+ExecStart=$BIN_DIR/heyclicky daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+# Remove legacy XDG autostart entries in favor of systemd
+rm -f "$HOME/.config/autostart/heyclicky-daemon.desktop" "$HOME/.config/autostart/clicky-daemon.desktop"
+
+systemctl --user daemon-reload
+systemctl --user enable heyclicky.service
+
+# 7. Hot-inject Live evdev Session Permissions & Persist via udev
 echo -e "🔌 Binding permanent hardware group rules via udev..."
 sudo usermod -aG input "$USER" || true
 
@@ -65,10 +89,12 @@ sudo udevadm control --reload-rules && sudo udevadm trigger || true
 # Apply temporary live ACL so it works instantly without a log-out/reboot
 sudo setfacl -m u:"$USER":r /dev/input/event* || true
 
-# 6. Success Output & Launch Directives
-echo -e "\n${GREEN}✅ HeyClicky installation complete!${NC}"
-echo -e "----------------------------------------"
-echo -e "1. ${YELLOW}CRITICAL:${NC} Open ${BLUE}$CONFIG_DIR/credentials.env${NC} and add your real API keys."
-echo -e "2. Start the desktop layer background daemon by running:"
-echo -e "   ${BLUE}HeyClicky-x86_64.AppImage daemon &${NC}"
-echo -e "----------------------------------------"
+# 8. Success Output & Launch Directives
+echo -e "\n${GREEN}✅ HeyClicky has been successfully installed to your system!${NC}"
+echo -e "--------------------------------------------------------"
+echo -e "1. ${YELLOW}CRITICAL:${NC} Open ${BLUE}$CONFIG_DIR/credentials.env${NC} and paste your API keys."
+echo -e "2. Once your keys are added, start the background engine:"
+echo -e "   ${BLUE}systemctl --user start heyclicky${NC}"
+echo -e "--------------------------------------------------------"
+echo -e "💡 Track live logs at any time with:"
+echo -e "   ${BLUE}journalctl --user -u heyclicky -f${NC}"

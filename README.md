@@ -63,12 +63,14 @@ chmod +x HeyClicky-x86_64.AppImage
 ./HeyClicky-x86_64.AppImage setup
 
 # 3. Start the background monitoring daemon
-./HeyClicky-x86_64.AppImage daemon &
+systemctl --user start heyclicky
 ```
 
-To run HeyClicky automatically when your system starts:
-- **For AppImage**: Add `/path/to/HeyClicky-x86_64.AppImage daemon &` to your desktop environment startup applications.
-- **For Python script**: A desktop file is automatically generated at `~/.config/autostart/heyclicky-daemon.desktop` by the installer pointing to the virtual environment python interpreter.
+After installation, manage the daemon like any native system service:
+- **Status**: `systemctl --user status heyclicky`
+- **Stop**: `systemctl --user stop heyclicky`
+- **Restart**: `systemctl --user restart heyclicky`
+- **Logs**: `journalctl --user -u heyclicky -f`
 
 ---
 
