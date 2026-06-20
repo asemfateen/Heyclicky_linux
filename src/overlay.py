@@ -58,7 +58,7 @@ class HeyClickyOverlayWindow(Gtk.Window):
         # Use Layer Shell on Wayland for non-GNOME environments (GNOME doesn't support layer shell protocol)
         self.using_layer_shell = False
         desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
-        if has_layer_shell and session_type == "wayland" and "gnome" not in desktop:
+        if has_layer_shell and session_type == "wayland" and "gnome" not in desktop and "kde" not in desktop:
             try:
                 GtkLayerShell.init_for_window(self)
                 GtkLayerShell.set_monitor(self, monitor)
@@ -249,9 +249,27 @@ class HeyClickyOverlayWindow(Gtk.Window):
                 print(f"Failed to dynamically move fullscreen monitor: {e}", file=sys.stderr)
 
     def on_realize(self, widget):
-        # Configure the GdkWindow to let all pointer events pass through natively
-        widget.get_window().set_pass_through(True)
-        print("Overlay window realized and configured for native click-through.")
+        window = widget.get_window()
+        window.set_pass_through(True)
+        empty = cairo.Region()
+        window.input_shape_combine_region(empty, 0, 0)
+        parent = window.get_parent()
+        if parent:
+            parent.set_pass_through(True)
+            parent.input_shape_combine_region(empty, 0, 0)
+        GLib.idle_add(self._ensure_pass_through)
+
+    def _ensure_pass_through(self):
+        window = self.get_window()
+        if window is None:
+            return False
+        window.set_pass_through(True)
+        empty = cairo.Region()
+        window.input_shape_combine_region(empty, 0, 0)
+        parent = window.get_parent()
+        if parent:
+            parent.set_pass_through(True)
+        return False
 
     def on_poll_state(self):
         """Polls /tmp/heyclicky_state.json to update target positions."""
@@ -339,7 +357,12 @@ class HeyClickyOverlayWindow(Gtk.Window):
         return True
 
     def on_anim_tick(self):
-        """Updates animation positions and triggers redrawing."""
+        try:
+            return self._on_anim_tick()
+        except Exception:
+            return True
+
+    def _on_anim_tick(self):
         needs_redraw = False
         
         # Follow mouse pointer in real-time for cursor-glued states
@@ -699,19 +722,29 @@ def main():
     # This prevents backend mapping warnings or crashes on mixed environments
     env_file = os.path.expanduser("~/.config/heyclicky/env.conf")
     session_type = "wayland"
+    overlay_method = ""
     if os.path.exists(env_file):
         try:
             with open(env_file, "r") as f:
                 for line in f:
                     if "SESSION_TYPE" in line:
                         session_type = line.split("=")[-1].strip().strip('"').strip("'")
+                    if "OVERLAY_METHOD" in line:
+                        overlay_method = line.split("=")[-1].strip().strip('"').strip("'")
         except Exception:
             pass
 
     # Run host binary checks before initializing GTK overlay
     sanity_check_dependencies(session_type)
-                    
-    if session_type == "wayland":
+
+    # On KDE Wayland, GtkLayerShell overlay is unreliable (invisible cursor, broken pass-through).
+    # Use X11 (via XWayland) which works correctly with fullscreen+keep_above+input_shape_combine_region.
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+    if overlay_method == "x11":
+        os.environ["GDK_BACKEND"] = "x11"
+    elif overlay_method == "wayland":
+        os.environ["GDK_BACKEND"] = "wayland"
+    elif session_type == "wayland" and "kde" not in desktop:
         os.environ["GDK_BACKEND"] = "wayland"
     else:
         os.environ["GDK_BACKEND"] = "x11"
